@@ -3,11 +3,17 @@ import 'dotenv/config'
 import express from 'express'
 import { Pool } from 'pg'
 import { prisma } from './lib/prisma.js'
+import { sessionMiddleware } from './lib/session.js'
+import { rateLimit } from 'express-rate-limit'
+import authRouter from './routes/auth.js'
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3000)
 
 app.use(express.json())
+app.use(sessionMiddleware)
+app.use('/api/auth', authRouter)
+
 
 function requiredEnv(name: string): string {
   const value = process.env[name]
@@ -87,6 +93,18 @@ app.get('/api/health/db-query', async (_req, res) => {
     })
   }
 })
+
+
+app.get('/api/health/session', (req, res) => {
+  req.session.sessionCheck = true
+
+  res.status(200).json({
+    status: 'ok',
+    message: 'Session middleware is working',
+    sessionActive: req.session.sessionCheck,
+  })
+})
+
 
 
 app.listen(PORT, () => {
