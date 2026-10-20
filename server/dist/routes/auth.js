@@ -79,4 +79,124 @@ authRouter.post('/register', async (req, res) => {
         });
     }
 });
+const loginSchema = z.object({
+    email: z.string().trim().email().max(254)
+        .transform((value) => value.toLowerCase()),
+    password: z.string().min(1).max(72),
+});
+authRouter.post('/login', async (req, res) => {
+    const validation = loginSchema.safeParse(req.body);
+    if (!validation.success) {
+        return res.status(400).json({
+            status: 'error',
+            message: 'Please provide a valid email and password',
+        });
+    }
+    const { email, password } = validation.data;
+    try {
+        const user = await prisma.user.findUnique({
+            where: { email },
+        });
+        // Use the same response for an unknown email
+        // and an incorrect password.
+        if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid email or password',
+            });
+        }
+        req.session.regenerate((sessionError) => {
+            if (sessionError) {
+                console.error('Session regeneration failed:', sessionError);
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Unable to start your session',
+                });
+            }
+            req.session.userId = user.id;
+            req.session.save((saveError) => {
+                if (saveError) {
+                    console.error('Session save failed:', saveError);
+                    return res.status(500).json({
+                        status: 'error',
+                        message: 'Unable to save your session',
+                    });
+                }
+                return res.status(200).json({
+                    status: 'ok',
+                    message: 'Login successful',
+                    user: {
+                        id: user.id,
+                        name: user.name,
+                        email: user.email,
+                    },
+                });
+            });
+        });
+    }
+    catch (error) {
+        console.error('Login failed:', error);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Unable to log in',
+        });
+    }
+});
+authRouter.get('/me', async (req, res) => {
+    if (!req.session.userId) {
+        return res.status(401).json({
+            status: 'error',
+            message: 'Not authenticated',
+        });
+    }
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.session.userId },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                createdAt: true,
+            },
+        });
+        if (!user) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Not authenticated',
+            });
+        }
+        return res.status(200).json({
+            status: 'ok',
+            user,
+        });
+    }
+    catch (error) {
+        console.error('Current-user lookup failed:', error);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Unable to retrieve account',
+        });
+    }
+});
+authRouter.post('/logout', (req, res) => {
+    req.session.destroy((error) => {
+        if (error) {
+            console.error('Logout failed:', error);
+            return res.status(500).json({
+                status: 'error',
+                message: 'Unable to log out',
+            });
+        }
+        res.clearCookie('formpilot.sid', {
+            path: '/',
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production',
+        });
+        return res.status(200).json({
+            status: 'ok',
+            message: 'Logout successful',
+        });
+    });
+});
 export default authRouter;
