@@ -1,0 +1,102 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FormStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum FormFieldType {
+  SHORT_TEXT
+  LONG_TEXT
+  EMAIL
+  NUMBER
+  DROPDOWN
+  MULTIPLE_CHOICE
+  CHECKBOX
+  DATE
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  forms        Form[]
+}
+
+model Form {
+  id          String     @id @default(uuid()) @db.Uuid
+  ownerId     String     @db.Uuid
+  title       String
+  description String?
+  status      FormStatus @default(DRAFT)
+  publicId    String?    @unique
+  schemaVersion Int      @default(1)
+  publishedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  owner       User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  fields      FormField[]
+  submissions Submission[]
+
+  @@index([ownerId, updatedAt])
+  @@index([status])
+}
+
+model FormField {
+  id         String        @id @default(uuid()) @db.Uuid
+  formId     String        @db.Uuid
+  label      String
+  type       FormFieldType
+  required   Boolean       @default(false)
+  position   Int
+  options    Json?
+  validation Json?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  form       Form          @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, position])
+  @@index([formId])
+}
+
+model Submission {
+  id                   String   @id @default(uuid()) @db.Uuid
+  formId               String   @db.Uuid
+  formSchemaVersion    Int
+  formVersionSnapshot  Json
+  submittedAt          DateTime @default(now())
+
+  form                 Form     @relation(fields: [formId], references: [id], onDelete: Restrict)
+  answers              SubmissionAnswer[]
+
+  @@index([formId, submittedAt])
+}
+
+model SubmissionAnswer {
+  id           String     @id @default(uuid()) @db.Uuid
+  submissionId String     @db.Uuid
+  fieldId      String     @db.Uuid
+  fieldLabel   String
+  fieldType    FormFieldType
+  value        Json
+
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, fieldId])
+  @@index([submissionId])
+}

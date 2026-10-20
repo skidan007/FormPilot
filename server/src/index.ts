@@ -2,6 +2,7 @@
 import 'dotenv/config'
 import express from 'express'
 import { Pool } from 'pg'
+import { prisma } from './lib/prisma.js'
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3000)
@@ -58,6 +59,35 @@ app.get('/api/health/db', async (_req, res) => {
     })
   }
 })
+
+
+
+
+app.get('/api/health/db-query', async (_req, res) => {
+  try {
+    const [userCount, formCount] = await Promise.all([
+      prisma.user.count(),
+      prisma.form.count(),
+    ])
+
+    res.status(200).json({
+      status: 'ok',
+      message: 'Prisma database queries successful',
+      tables: {
+        users: userCount,
+        forms: formCount,
+      },
+    })
+  } catch (error) {
+    console.error('Prisma query failed:', error)
+
+    res.status(503).json({
+      status: 'error',
+      message: 'Database query failed',
+    })
+  }
+})
+
 
 app.listen(PORT, () => {
   console.log(`FormPilot API running at http://localhost:${PORT}`)
