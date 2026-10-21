@@ -4,11 +4,15 @@ import { Pool } from 'pg';
 import { prisma } from './lib/prisma.js';
 import { sessionMiddleware } from './lib/session.js';
 import authRouter from './routes/auth.js';
+import formsRouter from './routes/forms.js';
+import fieldsRouter from './routes/fields.js';
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 app.use(express.json());
 app.use(sessionMiddleware);
+app.use('/api/forms', formsRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/forms/:formId/fields', fieldsRouter);
 function requiredEnv(name) {
     const value = process.env[name];
     if (!value) {

@@ -2,17 +2,45 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
+import rateLimit from 'express-rate-limit'
 import { prisma } from '../lib/prisma.js'
+import { requireAuth } from '../middleware/requireAuth.js'
 
 const authRouter = Router()
 
+// Limit repeated authentication attempts.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: 'error',
+    message: 'Too many login attempts. Please try again in 15 minutes.',
+  },
+})
+
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: 'error',
+    message: 'Too many registration attempts. Please try again later.',
+  },
+})
+
+// Registration validation.
 const registerSchema = z.object({
   name: z.string().trim().min(2).max(100).optional(),
-  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+  email: z.string().trim().email().max(254)
+    .transform((value) => value.toLowerCase()),
   password: z.string().min(12).max(72),
 })
 
-authRouter.post('/register', async (req, res) => {
+// POST /api/auth/register
+authRouter.post('/register', registerLimiter, async (req, res) => {
   const validation = registerSchema.safeParse(req.body)
 
   if (!validation.success) {
@@ -44,11 +72,7 @@ authRouter.post('/register', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 12)
 
     const user = await prisma.user.create({
-      data: {
-        name,
-        email,
-        passwordHash,
-      },
+      data: { name, email, passwordHash },
       select: {
         id: true,
         name: true,
@@ -60,10 +84,10 @@ authRouter.post('/register', async (req, res) => {
     req.session.regenerate((sessionError) => {
       if (sessionError) {
         console.error('Session regeneration failed:', sessionError)
-
         return res.status(500).json({
           status: 'error',
-          message: 'Account created, but sign-in could not be completed. Please log in.',
+          message:
+            'Account created, but sign-in could not be completed. Please log in.',
         })
       }
 
@@ -72,10 +96,10 @@ authRouter.post('/register', async (req, res) => {
       req.session.save((saveError) => {
         if (saveError) {
           console.error('Session save failed:', saveError)
-
           return res.status(500).json({
             status: 'error',
-            message: 'Account created, but sign-in could not be completed. Please log in.',
+            message:
+              'Account created, but sign-in could not be completed. Please log in.',
           })
         }
 
@@ -88,7 +112,6 @@ authRouter.post('/register', async (req, res) => {
     })
   } catch (error) {
     console.error('Registration failed:', error)
-
     return res.status(500).json({
       status: 'error',
       message: 'Unable to create account',
@@ -96,15 +119,15 @@ authRouter.post('/register', async (req, res) => {
   }
 })
 
-
-
+// Login validation.
 const loginSchema = z.object({
   email: z.string().trim().email().max(254)
     .transform((value) => value.toLowerCase()),
   password: z.string().min(1).max(72),
 })
 
-authRouter.post('/login', async (req, res) => {
+// POST /api/auth/login
+authRouter.post('/login', loginLimiter, async (req, res) => {
   const validation = loginSchema.safeParse(req.body)
 
   if (!validation.success) {
@@ -121,8 +144,6 @@ authRouter.post('/login', async (req, res) => {
       where: { email },
     })
 
-    // Use the same response for an unknown email
-    // and an incorrect password.
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       return res.status(401).json({
         status: 'error',
@@ -133,7 +154,6 @@ authRouter.post('/login', async (req, res) => {
     req.session.regenerate((sessionError) => {
       if (sessionError) {
         console.error('Session regeneration failed:', sessionError)
-
         return res.status(500).json({
           status: 'error',
           message: 'Unable to start your session',
@@ -145,7 +165,6 @@ authRouter.post('/login', async (req, res) => {
       req.session.save((saveError) => {
         if (saveError) {
           console.error('Session save failed:', saveError)
-
           return res.status(500).json({
             status: 'error',
             message: 'Unable to save your session',
@@ -165,7 +184,6 @@ authRouter.post('/login', async (req, res) => {
     })
   } catch (error) {
     console.error('Login failed:', error)
-
     return res.status(500).json({
       status: 'error',
       message: 'Unable to log in',
@@ -173,8 +191,8 @@ authRouter.post('/login', async (req, res) => {
   }
 })
 
-
-authRouter.get('/me', async (req, res) => {
+// GET /api/auth/me
+authRouter.get('/me', requireAuth, async (req, res) => {
   if (!req.session.userId) {
     return res.status(401).json({
       status: 'error',
@@ -206,7 +224,6 @@ authRouter.get('/me', async (req, res) => {
     })
   } catch (error) {
     console.error('Current-user lookup failed:', error)
-
     return res.status(500).json({
       status: 'error',
       message: 'Unable to retrieve account',
@@ -214,13 +231,11 @@ authRouter.get('/me', async (req, res) => {
   }
 })
 
-
-
+// POST /api/auth/logout
 authRouter.post('/logout', (req, res) => {
   req.session.destroy((error) => {
     if (error) {
       console.error('Logout failed:', error)
-
       return res.status(500).json({
         status: 'error',
         message: 'Unable to log out',
@@ -240,6 +255,5 @@ authRouter.post('/logout', (req, res) => {
     })
   })
 })
-
 
 export default authRouter
