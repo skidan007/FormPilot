@@ -766,4 +766,14 @@
   .create-modal {
     padding: 27px 21px;
   }
+
+  .api-error {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #f3c6c6;
+  border-radius: 8px;
+  background: #fff4f4;
+  color: #a12626;
+  font-size: 14px;
+}
 }

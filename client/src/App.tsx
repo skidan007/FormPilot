@@ -1,49 +1,173 @@
-import { useState } from 'react'
-import './App.css'
+import { useEffect, useState } from "react";
+import Login from "./Login";
+import { apiRequest } from "./lib/api";
+import "./App.css";
 
 type FormSummary = {
-  id: number
-  title: string
-  status: 'Draft'
-  updatedAt: string
-}
+  id: string;
+  title: string;
+  description: string | null;
+  status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+  updatedAt: string;
+  _count?: {
+    submissions: number;
+  };
+};
 
+type User = {
+  id: string;
+  email: string;
+  name?: string | null;
+};
+
+type FormsResponse = {
+  status: string;
+  count: number;
+  forms: FormSummary[];
+};
+
+type AuthResponse = {
+  status: string;
+  user: User;
+};
 const navigationItems = [
-  { label: 'Overview', icon: '◫' },
-  { label: 'My forms', icon: '▤' },
-  { label: 'Submissions', icon: '↙' },
-] as const
-
+  { label: "Overview", icon: "◫" },
+  { label: "My forms", icon: "▤" },
+  { label: "Submissions", icon: "↙" },
+] as const;
 
 function App() {
-  const [activeNav, setActiveNav] = useState<string>('Overview')
-  const [forms, setForms] = useState<FormSummary[]>([])
-  const [showCreateForm, setShowCreateForm] = useState(false)
-  const [formTitle, setFormTitle] = useState('')
+  const [activeNav, setActiveNav] = useState<string>("Overview");
+  const [forms, setForms] = useState<FormSummary[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [formTitle, setFormTitle] = useState("");
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [formsLoading, setFormsLoading] = useState(false);
+  const [apiError, setApiError] = useState("");
 
-  function handleCreateForm() {
-    const title = formTitle.trim()
+  useEffect(() => {
+    let cancelled = false;
 
-    if (!title) return
+    async function restoreSession() {
+      try {
+        const result = await apiRequest<AuthResponse>("/auth/me");
 
-    const newForm: FormSummary = {
-      id: Date.now(),
-      title,
-      status: 'Draft',
-      updatedAt: new Date().toLocaleDateString(),
+        if (!cancelled) {
+          setUser(result.user);
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthLoading(false);
+        }
+      }
     }
 
-    setForms((currentForms) => [newForm, ...currentForms])
-    setFormTitle('')
-    setShowCreateForm(false)
-    setActiveNav('My forms')
+    void restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    async function loadForms() {
+      setFormsLoading(true);
+      setApiError("");
+
+      try {
+        const result = await apiRequest<FormsResponse>("/forms");
+
+        if (!cancelled) {
+          setForms(result.forms);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setApiError(
+            error instanceof Error ? error.message : "Unable to load forms.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setFormsLoading(false);
+        }
+      }
+    }
+
+    void loadForms();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  function handleLogin(loggedInUser: User) {
+    setUser(loggedInUser);
+  }
+
+  async function handleLogout() {
+    try {
+      await apiRequest<{ status: string }>("/auth/logout", {
+        method: "POST",
+      });
+    } finally {
+      setUser(null);
+      setForms([]);
+      setApiError("");
+      setActiveNav("Overview");
+    }
+  }
+
+  async function handleCreateForm() {
+    const title = formTitle.trim();
+
+    if (!title) return;
+
+    setApiError("");
+
+    try {
+      const result = await apiRequest<{
+        status: string;
+        message: string;
+        form: FormSummary;
+      }>("/forms", {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
+
+      setForms((currentForms) => [
+        result.form,
+        ...currentForms.filter((form) => form.id !== result.form.id),
+      ]);
+
+      setFormTitle("");
+      setShowCreateForm(false);
+      setActiveNav("My forms");
+    } catch (error) {
+      setApiError(
+        error instanceof Error ? error.message : "Unable to create your form.",
+      );
+    }
   }
 
   const visibleForms =
-    activeNav === 'Overview' || activeNav === 'My forms'
-      ? forms
-      : []
+    activeNav === "Overview" || activeNav === "My forms" ? forms : [];
 
+  if (authLoading) {
+    return <main className="login-page">Checking your session...</main>;
+  }
+
+  if (!user) {
+    return <Login onLogin={handleLogin} />;
+  }
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -59,16 +183,14 @@ function App() {
             <button
               key={item.label}
               type="button"
-              className={`nav-item ${
-                activeNav === item.label ? 'active' : ''
-              }`}
+              className={`nav-item ${activeNav === item.label ? "active" : ""}`}
               onClick={() => setActiveNav(item.label)}
             >
               <span className="nav-icon" aria-hidden="true">
                 {item.icon}
               </span>
               {item.label}
-              {item.label === 'My forms' && forms.length > 0 && (
+              {item.label === "My forms" && forms.length > 0 && (
                 <span className="nav-count">{forms.length}</span>
               )}
             </button>
@@ -88,7 +210,9 @@ function App() {
               <strong>Workspace owner</strong>
               <span>Local preview</span>
             </div>
-            <span className="profile-menu" aria-hidden="true">···</span>
+            <span className="profile-menu" aria-hidden="true">
+              ···
+            </span>
           </div>
         </div>
       </aside>
@@ -104,6 +228,14 @@ function App() {
               <span className="status-dot" />
               Development preview
             </span>
+
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => void handleLogout()}
+            >
+              Sign out
+            </button>
           </div>
         </header>
 
@@ -112,16 +244,16 @@ function App() {
             <div>
               <p className="eyebrow">YOUR WORKSPACE</p>
               <h1>
-                {activeNav === 'Submissions'
-                  ? 'Submissions'
-                  : activeNav === 'My forms'
-                    ? 'My forms'
-                    : 'Good things start with a form.'}
+                {activeNav === "Submissions"
+                  ? "Submissions"
+                  : activeNav === "My forms"
+                    ? "My forms"
+                    : "Good things start with a form."}
               </h1>
               <p className="page-description">
-                {activeNav === 'Submissions'
-                  ? 'Your form responses will be available here once submissions are connected.'
-                  : 'Create forms, collect responses, and turn feedback into insights.'}
+                {activeNav === "Submissions"
+                  ? "Your form responses will be available here once submissions are connected."
+                  : "Create forms, collect responses, and turn feedback into insights."}
               </p>
             </div>
 
@@ -165,39 +297,49 @@ function App() {
           </section>
 
           <section className="forms-section">
+            {apiError && (
+              <p className="api-error" role="alert">
+                {apiError}
+              </p>
+            )}
             <div className="section-heading">
               <div>
                 <h2>
-                  {activeNav === 'Submissions'
-                    ? 'Response centre'
-                    : 'Your forms'}
+                  {activeNav === "Submissions"
+                    ? "Response centre"
+                    : "Your forms"}
                 </h2>
                 <p>
-                  {activeNav === 'Submissions'
-                    ? 'Review responses after your forms go live.'
-                    : 'Manage your forms from one place.'}
+                  {activeNav === "Submissions"
+                    ? "Review responses after your forms go live."
+                    : "Manage your forms from one place."}
                 </p>
               </div>
 
-              {forms.length > 0 && activeNav !== 'Submissions' && (
+              {forms.length > 0 && activeNav !== "Submissions" && (
                 <button
                   type="button"
                   className="text-button"
-                  onClick={() => setActiveNav('My forms')}
+                  onClick={() => setActiveNav("My forms")}
                 >
                   View all forms →
                 </button>
               )}
             </div>
 
-            {activeNav === 'Submissions' ? (
+            {activeNav === "Submissions" ? (
               <div className="empty-state">
                 <div className="empty-icon">☷</div>
                 <h3>No responses yet</h3>
                 <p>
-                  Once your forms are published and people submit them,
-                  their responses will appear here.
+                  Once your forms are published and people submit them, their
+                  responses will appear here.
                 </p>
+              </div>
+            ) : formsLoading ? (
+              <div className="empty-state">
+                <h3>Loading your forms...</h3>
+                <p>Please wait while we retrieve your saved forms.</p>
               </div>
             ) : visibleForms.length === 0 ? (
               <div className="empty-state">
@@ -214,8 +356,8 @@ function App() {
 
                 <h3>Your first form is waiting</h3>
                 <p>
-                  Start with a feedback form, a survey, or a registration
-                  form. You can customise it as you go.
+                  Start with a feedback form, a survey, or a registration form.
+                  You can customise it as you go.
                 </p>
 
                 <button
@@ -235,7 +377,13 @@ function App() {
                       <strong>{form.title}</strong>
                       <span>Updated {form.updatedAt}</span>
                     </div>
-                    <span className="draft-badge">{form.status}</span>
+                    <span className="draft-badge">
+                      {form.status === "DRAFT"
+                        ? "Draft"
+                        : form.status === "PUBLISHED"
+                          ? "Published"
+                          : "Archived"}
+                    </span>
                     <button
                       type="button"
                       className="row-menu"
@@ -262,7 +410,7 @@ function App() {
           className="modal-backdrop"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setShowCreateForm(false)
+              setShowCreateForm(false);
             }
           }}
         >
@@ -289,8 +437,8 @@ function App() {
 
             <form
               onSubmit={(event) => {
-                event.preventDefault()
-                handleCreateForm()
+                event.preventDefault();
+                void handleCreateForm();
               }}
             >
               <label htmlFor="form-title">Form name</label>
@@ -321,7 +469,7 @@ function App() {
         </div>
       )}
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
