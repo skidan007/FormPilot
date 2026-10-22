@@ -8,6 +8,7 @@ import { rateLimit } from 'express-rate-limit'
 import authRouter from './routes/auth.js'
 import formsRouter from './routes/forms.js'
 import fieldsRouter from './routes/fields.js'
+import { submissionsRouter } from "./routes/submissions.js";
 
 
 const app = express()
@@ -18,7 +19,7 @@ app.use(sessionMiddleware)
 app.use('/api/forms', formsRouter)
 app.use('/api/auth', authRouter)
 app.use('/api/forms/:formId/fields', fieldsRouter)
-
+app.use('/api/forms/:formId/submissions', submissionsRouter)
 
 function requiredEnv(name: string): string {
   const value = process.env[name]

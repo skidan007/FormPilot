@@ -161,6 +161,121 @@ const updateFieldSchema = z.object({
   { message: 'Provide at least one field property to update' }
 )
 
+
+fieldsRouter.patch('/reorder', requireAuth, async (req, res) => {
+  try {
+    const ownerId = req.session.userId
+    const formId = req.params.formId
+
+    if (!ownerId) {
+      res.status(401).json({
+        status: 'error',
+        message: 'Authentication required',
+      })
+      return
+    }
+
+    if (typeof formId !== 'string') {
+      res.status(400).json({
+        status: 'error',
+        message: 'Invalid form ID',
+      })
+      return
+    }
+
+    const parsed = reorderFieldsSchema.safeParse(req.body)
+
+    if (!parsed.success) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Invalid field order',
+        errors: parsed.error.flatten(),
+      })
+      return
+    }
+
+    const form = await prisma.form.findFirst({
+      where: {
+        id: formId,
+        ownerId,
+        status: 'DRAFT',
+      },
+      select: { id: true },
+    })
+
+    if (!form) {
+      res.status(404).json({
+        status: 'error',
+        message: 'Draft form not found',
+      })
+      return
+    }
+
+    const existingFields = await prisma.formField.findMany({
+      where: { formId },
+      select: { id: true },
+    })
+
+    const requestedIds = parsed.data.fieldIds
+    const existingIds = new Set(existingFields.map((field) => field.id))
+
+    // Require every field to be included exactly once.
+    if (
+      requestedIds.length !== existingFields.length ||
+      requestedIds.some((id) => !existingIds.has(id))
+    ) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Provide every field ID belonging to this form, exactly once',
+      })
+      return
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Move positions to temporary negative values first to avoid
+      // conflicts with the unique constraint on (formId, position).
+      for (let index = 0; index < requestedIds.length; index++) {
+        await tx.formField.update({
+          where: { id: requestedIds[index] },
+          data: { position: -(index + 1) },
+        })
+      }
+
+      for (let index = 0; index < requestedIds.length; index++) {
+        await tx.formField.update({
+          where: { id: requestedIds[index] },
+          data: { position: index + 1 },
+        })
+      }
+
+      await tx.form.update({
+        where: { id: formId },
+        data: { updatedAt: new Date() },
+      })
+    })
+
+    const fields = await prisma.formField.findMany({
+      where: { formId },
+      orderBy: { position: 'asc' },
+    })
+
+    res.json({
+      status: 'ok',
+      message: 'Form fields reordered successfully',
+      fields,
+    })
+  } catch (error) {
+    console.error('Reorder form fields error:', error)
+
+    res.status(500).json({
+      status: 'error',
+      message: 'Unable to reorder form fields',
+    })
+  }
+})
+
+
+
 fieldsRouter.patch('/:fieldId', requireAuth, async (req, res) => {
   try {
     const ownerId = req.session.userId
@@ -447,117 +562,6 @@ const reorderFieldsSchema = z.object({
   { message: 'Field IDs must not contain duplicates' }
 )
 
-fieldsRouter.patch('/reorder', requireAuth, async (req, res) => {
-  try {
-    const ownerId = req.session.userId
-    const formId = req.params.formId
-
-    if (!ownerId) {
-      res.status(401).json({
-        status: 'error',
-        message: 'Authentication required',
-      })
-      return
-    }
-
-    if (typeof formId !== 'string') {
-      res.status(400).json({
-        status: 'error',
-        message: 'Invalid form ID',
-      })
-      return
-    }
-
-    const parsed = reorderFieldsSchema.safeParse(req.body)
-
-    if (!parsed.success) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Invalid field order',
-        errors: parsed.error.flatten(),
-      })
-      return
-    }
-
-    const form = await prisma.form.findFirst({
-      where: {
-        id: formId,
-        ownerId,
-        status: 'DRAFT',
-      },
-      select: { id: true },
-    })
-
-    if (!form) {
-      res.status(404).json({
-        status: 'error',
-        message: 'Draft form not found',
-      })
-      return
-    }
-
-    const existingFields = await prisma.formField.findMany({
-      where: { formId },
-      select: { id: true },
-    })
-
-    const requestedIds = parsed.data.fieldIds
-    const existingIds = new Set(existingFields.map((field) => field.id))
-
-    // Require every field to be included exactly once.
-    if (
-      requestedIds.length !== existingFields.length ||
-      requestedIds.some((id) => !existingIds.has(id))
-    ) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Provide every field ID belonging to this form, exactly once',
-      })
-      return
-    }
-
-    await prisma.$transaction(async (tx) => {
-      // Move positions to temporary negative values first to avoid
-      // conflicts with the unique constraint on (formId, position).
-      for (let index = 0; index < requestedIds.length; index++) {
-        await tx.formField.update({
-          where: { id: requestedIds[index] },
-          data: { position: -(index + 1) },
-        })
-      }
-
-      for (let index = 0; index < requestedIds.length; index++) {
-        await tx.formField.update({
-          where: { id: requestedIds[index] },
-          data: { position: index + 1 },
-        })
-      }
-
-      await tx.form.update({
-        where: { id: formId },
-        data: { updatedAt: new Date() },
-      })
-    })
-
-    const fields = await prisma.formField.findMany({
-      where: { formId },
-      orderBy: { position: 'asc' },
-    })
-
-    res.json({
-      status: 'ok',
-      message: 'Form fields reordered successfully',
-      fields,
-    })
-  } catch (error) {
-    console.error('Reorder form fields error:', error)
-
-    res.status(500).json({
-      status: 'error',
-      message: 'Unable to reorder form fields',
-    })
-  }
-})
 
 
 
