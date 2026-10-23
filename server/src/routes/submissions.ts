@@ -23,7 +23,7 @@ function escapeCsv(value: unknown): string {
   }
 
   // Prevent spreadsheet formula injection in untrusted text.
-  if (/^[\t\r ]*[=+\-@]/.test(text)) {
+  if (/^[\t\n\r ]*[=+\-@]/.test(text)) {
     text = `'${text}`;
   }
 
